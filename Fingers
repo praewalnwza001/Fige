@@ -1,0 +1,382 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=no">
+    <title>Math Finger</title>
+    
+    <!-- ฟอนต์ Kanit และ Space Grotesk -->
+    <link href="https://fonts.googleapis.com/css2?family=Kanit:wght@300;400;600&family=Space+Grotesk:wght@400;600;700&display=swap" rel="stylesheet">
+    
+    <!-- MediaPipe Libraries -->
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+
+    <style>
+        :root {
+            --primary-dark: #0f172a;
+            --primary-blue: #3b82f6;
+            --glass-bg: rgba(255, 255, 255, 0.1);
+            --glass-border: rgba(255, 255, 255, 0.2);
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            user-select: none; /* ป้องกันการคลุมดำข้อความ */
+        }
+
+        body {
+            font-family: 'Kanit', sans-serif;
+            background: linear-gradient(135deg, var(--primary-dark), #1e3a8a);
+            color: white;
+            height: 100vh;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .number-font {
+            font-family: 'Space Grotesk', sans-serif;
+        }
+
+        /* Glassmorphism Card */
+        .glass-card {
+            background: var(--glass-bg);
+            backdrop-filter: blur(10px);
+            -webkit-backdrop-filter: blur(10px);
+            border: 1px solid var(--glass-border);
+            border-radius: 24px;
+            padding: 2rem;
+            text-align: center;
+            box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.3);
+            max-width: 90%;
+            width: 500px;
+            z-index: 10;
+        }
+
+        /* Video / Canvas */
+        #videoElement { display: none; }
+        #canvasElement {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            object-fit: cover;
+            transform: scaleX(-1); /* สลับซ้ายขวาแบบ Mirror */
+            z-index: 1;
+            opacity: 0.6;
+        }
+
+        /* UI Overlays */
+        .screen {
+            position: absolute;
+            z-index: 10;
+            display: none;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            width: 100%;
+            height: 100%;
+        }
+
+        .active { display: flex; }
+
+        h1 { font-size: 3rem; margin-bottom: 1rem; text-shadow: 0 4px 10px rgba(0,0,0,0.5); }
+        h2 { font-size: 2rem; margin-bottom: 1rem; }
+        
+        #questionDisplay { font-size: 5rem; font-weight: bold; text-shadow: 0 0 20px var(--primary-blue); margin: 20px 0; }
+        
+        .hud {
+            position: absolute;
+            top: 20px;
+            width: 100%;
+            display: flex;
+            justify-content: space-between;
+            padding: 0 20px;
+            font-size: 1.5rem;
+            z-index: 10;
+        }
+
+        .finger-count-display {
+            font-size: 2rem;
+            background: rgba(0,0,0,0.5);
+            padding: 10px 20px;
+            border-radius: 12px;
+            margin-top: 10px;
+        }
+
+        button {
+            background: var(--primary-blue);
+            color: white;
+            border: none;
+            padding: 15px 40px;
+            font-size: 1.5rem;
+            border-radius: 50px;
+            cursor: pointer;
+            font-family: 'Kanit', sans-serif;
+            transition: transform 0.2s, background 0.2s;
+            box-shadow: 0 4px 15px rgba(59, 130, 246, 0.5);
+            margin: 10px;
+        }
+
+        button:hover {
+            transform: scale(1.05);
+            background: #2563eb;
+        }
+
+        #footer {
+            position: absolute;
+            bottom: 10px;
+            width: 100%;
+            text-align: center;
+            font-size: 0.9rem;
+            opacity: 0.7;
+            z-index: 20;
+        }
+
+        /* Feedback Animation */
+        @keyframes correctGlow {
+            0% { box-shadow: 0 0 0px #4ade80; }
+            50% { box-shadow: 0 0 50px #4ade80; }
+            100% { box-shadow: 0 0 0px #4ade80; }
+        }
+        .correct-glow { animation: correctGlow 1s ease-out; }
+        
+        .message-box {
+            position: absolute;
+            bottom: 60px;
+            background: rgba(0,0,0,0.7);
+            padding: 10px 20px;
+            border-radius: 10px;
+            color: #fbbf24;
+            display: none;
+            z-index: 15;
+        }
+    </style>
+</head>
+<body oncontextmenu="return false;" onkeydown="return false;">
+
+    <!-- WebCam Background -->
+    <video id="videoElement" autoplay playsinline></video>
+    <canvas id="canvasElement"></canvas>
+
+    <!-- Top HUD -->
+    <div class="hud" id="hud" style="display: none;">
+        <div>คะแนน: <span id="score" class="number-font">0</span></div>
+        <div>เวลา: <span id="time" class="number-font">60</span>s</div>
+    </div>
+
+    <!-- Start Screen -->
+    <div id="startScreen" class="screen active glass-card">
+        <h1>Math Finger</h1>
+        <p>แก้โจทย์ แล้วชูนิ้วให้ตรงกับคำตอบ (0-10)</p>
+        <button onclick="startGame()">เริ่มเกม</button>
+    </div>
+
+    <!-- Game Screen -->
+    <div id="gameScreen" class="screen">
+        <div id="questionDisplay" class="number-font">3 + 4</div>
+        <div class="finger-count-display">นิ้วที่นับได้: <span id="detectedFingers" class="number-font">0</span></div>
+        <div id="feedbackMsg" style="font-size: 2rem; color: #4ade80; display: none; margin-top:10px;">ถูกต้อง!</div>
+    </div>
+
+    <!-- End Screen -->
+    <div id="endScreen" class="screen glass-card">
+        <h2>หมดเวลา!</h2>
+        <p style="font-size: 1.5rem;">คะแนนรวมของคุณ</p>
+        <h1 id="finalScore" class="number-font">0</h1>
+        <button onclick="resetToStart()">เล่นอีกครั้ง</button>
+    </div>
+
+    <div class="message-box" id="warningMsg">กรุณาชูมือให้เห็นในกล้อง</div>
+    <div id="footer">Designed by 9Sanya.com</div>
+
+    <script>
+        const videoElement = document.getElementById('videoElement');
+        const canvasElement = document.getElementById('canvasElement');
+        const canvasCtx = canvasElement.getContext('2d');
+        
+        let score = 0;
+        let timeLeft = 60;
+        let currentAnswer = -1;
+        let gameTimer = null;
+        let isPlaying = false;
+        let cooldown = false;
+        let previousQuestion = "";
+
+        // สุ่มโจทย์คณิตศาสตร์
+        function generateQuestion() {
+            const operations = ['+', '-', '*', '/'];
+            let a, b, op, ans;
+            let isValid = false;
+
+            while (!isValid) {
+                op = operations[Math.floor(Math.random() * operations.length)];
+                a = Math.floor(Math.random() * 11);
+                b = Math.floor(Math.random() * 11);
+
+                if (op === '+') ans = a + b;
+                else if (op === '-') ans = a - b;
+                else if (op === '*') ans = a * b;
+                else if (op === '/') {
+                    if (b === 0) continue; 
+                    ans = a / b;
+                }
+
+                // เงื่อนไข: คำตอบ 0-10, จำนวนเต็ม, ไม่ติดลบ, และไม่ซ้ำข้อเดิม
+                if (ans >= 0 && ans <= 10 && Number.isInteger(ans)) {
+                    let qStr = `${a} ${op} ${b}`;
+                    if (qStr !== previousQuestion) {
+                        previousQuestion = qStr;
+                        currentAnswer = ans;
+                        isValid = true;
+                    }
+                }
+            }
+            document.getElementById('questionDisplay').innerText = previousQuestion;
+        }
+
+        // เริ่มเกม
+        function startGame() {
+            document.getElementById('startScreen').classList.remove('active');
+            document.getElementById('gameScreen').classList.add('active');
+            document.getElementById('hud').style.display = 'flex';
+            
+            score = 0;
+            timeLeft = 60;
+            updateHUD();
+            generateQuestion();
+            isPlaying = true;
+            
+            gameTimer = setInterval(() => {
+                timeLeft--;
+                updateHUD();
+                if (timeLeft <= 0) endGame();
+            }, 1000);
+
+            initCamera();
+        }
+
+        function endGame() {
+            isPlaying = false;
+            clearInterval(gameTimer);
+            document.getElementById('gameScreen').classList.remove('active');
+            document.getElementById('hud').style.display = 'none';
+            document.getElementById('endScreen').classList.add('active');
+            document.getElementById('finalScore').innerText = score;
+        }
+
+        function resetToStart() {
+            document.getElementById('endScreen').classList.remove('active');
+            document.getElementById('startScreen').classList.add('active');
+        }
+
+        function updateHUD() {
+            document.getElementById('score').innerText = score;
+            document.getElementById('time').innerText = timeLeft;
+        }
+
+        // จัดการ MediaPipe Hands
+        const hands = new Hands({
+            locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
+        });
+
+        hands.setOptions({
+            maxNumHands: 2,
+            modelComplexity: 1,
+            minDetectionConfidence: 0.7,
+            minTrackingConfidence: 0.7
+        });
+
+        hands.onResults(onResults);
+
+        function initCamera() {
+            const camera = new Camera(videoElement, {
+                onFrame: async () => { await hands.send({image: videoElement}); },
+                width: 1280,
+                height: 720
+            });
+            camera.start();
+        }
+
+        // ประมวลผลนิ้วมือ
+        let stableFingerCount = -1;
+        let stabilizeFrames = 0;
+
+        function onResults(results) {
+            // ปรับขนาด Canvas ให้ตรงกับกล้อง
+            canvasElement.width = videoElement.videoWidth;
+            canvasElement.height = videoElement.videoHeight;
+            canvasCtx.save();
+            canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
+            
+            let totalFingers = 0;
+
+            if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
+                document.getElementById('warningMsg').style.display = 'none';
+                
+                results.multiHandLandmarks.forEach((landmarks, index) => {
+                    // วาดเส้น Landmark
+                    drawConnectors(canvasCtx, landmarks, HAND_CONNECTIONS, {color: '#ffffff', lineWidth: 3});
+                    drawLandmarks(canvasCtx, landmarks, {color: '#3b82f6', lineWidth: 2});
+
+                    let handLabel = results.multiHandedness[index].label; // "Left" หรือ "Right"
+                    
+                    // คำนวณการชูนิ้ว
+                    if (handLabel === "Right") { // สลับซ้ายขวาเพราะภาพหน้ากระจก
+                        if (landmarks[4].x > landmarks[3].x) totalFingers++; // นิ้วโป้งขวา
+                    } else {
+                        if (landmarks[4].x < landmarks[3].x) totalFingers++; // นิ้วโป้งซ้าย
+                    }
+                    if (landmarks[8].y < landmarks[6].y) totalFingers++; // ชี้
+                    if (landmarks[12].y < landmarks[10].y) totalFingers++; // กลาง
+                    if (landmarks[16].y < landmarks[14].y) totalFingers++; // นาง
+                    if (landmarks[20].y < landmarks[18].y) totalFingers++; // ก้อย
+                });
+            } else {
+                if(isPlaying) document.getElementById('warningMsg').style.display = 'block';
+            }
+            
+            canvasCtx.restore();
+
+            if (isPlaying && !cooldown) {
+                document.getElementById('detectedFingers').innerText = totalFingers;
+                
+                // ระบบทำให้ค่าการตรวจจับนิ่ง (Debounce)
+                if (totalFingers === stableFingerCount) {
+                    stabilizeFrames++;
+                } else {
+                    stableFingerCount = totalFingers;
+                    stabilizeFrames = 0;
+                }
+
+                // ยืนยันคำตอบเมื่อนิ้วนิ่งต่อเนื่อง
+                if (stabilizeFrames > 15 && totalFingers === currentAnswer) {
+                    cooldown = true;
+                    score += 10;
+                    updateHUD();
+                    
+                    // แสดง Feedback
+                    document.body.classList.add('correct-glow');
+                    document.getElementById('feedbackMsg').style.display = 'block';
+                    
+                    setTimeout(() => {
+                        document.body.classList.remove('correct-glow');
+                        document.getElementById('feedbackMsg').style.display = 'none';
+                        generateQuestion();
+                        cooldown = false;
+                        stabilizeFrames = 0;
+                    }, 1000);
+                }
+            }
+        }
+    </script>
+</body>
+</html>
+
